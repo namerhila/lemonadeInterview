@@ -47,7 +47,7 @@ Run the app with `./mvnw spring-boot:run` (port 8080). Fixture files for the cur
 
 **Tests first (`WordGetTest`, MockMvc; seed the counts with `repository.addCounts(Map)`)**
 - `unknownWord_returnsZero`: `/words/zzqq` → 200 `{"word":"zzqq","count":0}`
-- `lookupIsCaseInsensitive`: seed `country=2`. `/words/COUNTRY` and `/words/country` both → 2
+- `lookupIsCaseInsensitive`: seed `casecheck=2` (not `country`, which slice 3 counts). `/words/COUNTRY` and `/words/country` both → 2
 - `encodedRegexWord_isDecoded`: seed `^a.*b$=1`. `/words/%5Ea.*b%24` → 1
 - `word30Bytes_ok` / `word31Bytes_returns400`: 30 vs 31 × `a`. Also 16 Hebrew letters (32 bytes, 16 chars) → 400
 - `emptyWord_returns400`: `GET /words/` → 400 `{"error":...}`
@@ -113,7 +113,7 @@ curl -i -XPOST localhost:8080/words/ -H 'Content-Type: application/json' -d '{"u
 - `WordCounterTest` (calls `count(Reader, chunkSize)`):
   - `dashAndCommaSplit`: `Count-ry a,b` → `count=1, ry=1, a=1, b=1`
   - `lowercases`: `Country COUNTRY` → `country=2`
-  - `keepsNumbersRegexPunctuation`: `42 3.14 ^a.*b$ [0-9]+ country. country` → each counted separately
+  - `keepsNumbersRegexPunctuation`: `42 3.14 ^a.*b$ \d+ country. country` → each counted separately (a regex with `-` is split, per spec rule 2.1)
   - `dropsEmptyTokens`: `a--b ,,` → `a=1, b=1`
   - `crlfAndTabsAreWhitespace`: `a\r\nb\tc` → 3 words
   - `wordAcrossChunkBoundary`: chunkSize=3, `country country` → `country=2`
@@ -123,9 +123,9 @@ curl -i -XPOST localhost:8080/words/ -H 'Content-Type: application/json' -d '{"u
   - `countryTwice_getReturns2`: file `country country` → `/words/country`=2
   - `mixedCase_endToEnd`: file `Mixcase MIXCASE` → `/words/MiXcAsE`=2
   - `numbersAndRegex_lookupEncoded`: file `4242 ^q.*z$` → `/words/4242`=1, `/words/%5Eq.*z%24`=1
-  - `post_returns202BeforeDownloadFinishes`: `/slow` waits 3s. The POST answers in under 500ms.
+  - `post_returns202BeforeDownloadFinishes`: `/slow` waits 3s. The POST answers in under 1s.
   - `unreachableOr404_canRetry`: `http://localhost:1/x` and `/404` → 202. Poll the POST until it returns 202 again (the URL was freed).
-  - `brokenStream_mergesNothing`: `/broken` sends half the body, then closes. The URL becomes retryable, and its words stay 0.
+  - `brokenStream_mergesNothing`: `/broken` sends part of the body, then the handler throws so the server drops the connection. The URL becomes retryable, and its words stay 0.
   - `concurrentDifferentUrls_noLostCounts`: 10 URLs, each with `race` ×1000, POSTed in parallel → `/words/race`=10000
 
 **Implementation**
@@ -163,14 +163,14 @@ curl -s localhost:8080/words/the         # after a few seconds: large count (ten
 - `WordJobTest`:
   - `hebrewFile_202_countsUnchanged_canRetry`: a Hebrew file with the unique word `qqheb` → 202. Poll the POST until it returns 202 again. GET `/words/qqheb` stays 0.
   - `binaryFile_202_countsUnchanged_canRetry`: same, with random bytes
-  - `accentedFile_counted`: `/words/caf%C3%A9`=1
+  - `accentedFile_counted`: ~800 letters of plain English plus `the café is nice` → `/words/caf%C3%A9`=1 (a short text alone would be over 1%)
 
 **Implementation**
 1. In `WordCounter`: for each char, if it's a letter (`Character.isLetter`), increment `letters`. If it's a letter that isn't `a-z` or `A-Z`, also increment `nonLatin`. Once `letters ≥ 10000` and `nonLatin*100 > letters`, throw `NotEnglishException` early. At EOF, apply the same `> 1%` check.
 2. `WordService`: build the reader from `StandardCharsets.UTF_8.newDecoder().onMalformedInput(REPORT).onUnmappableCharacter(REPORT)`, so invalid UTF-8 throws.
 3. The job's existing catch block already calls `fail(url)` and logs. Log `NotEnglishException` as `"422 not English"`.
 
-**curl** (`printf 'שלום עולם זה טקסט' > /tmp/wc/he.txt; head -c 4000 /dev/urandom > /tmp/wc/bin.dat; printf 'the café is nice' > /tmp/wc/fr.txt`)
+**curl** (`printf 'שלום עולם זה טקסט' > /tmp/wc/he.txt; head -c 4000 /dev/urandom > /tmp/wc/bin.dat; { for i in $(seq 40); do printf 'the quick brown fox jumps '; done; printf 'the café is nice'; } > /tmp/wc/fr.txt`). `fr.txt` needs the padding: `the café is nice` alone is 1 accented letter in 13 (7.7%), which is rejected.
 ```
 curl -i -XPOST localhost:8080/words/ -H 'Content-Type: application/json' -d '{"url":"http://localhost:8000/he.txt"}'   # 202; log "422 not English"; repeat → 202
 curl -s localhost:8080/words/%D7%A9%D7%9C%D7%95%D7%9D                                                                     # count 0

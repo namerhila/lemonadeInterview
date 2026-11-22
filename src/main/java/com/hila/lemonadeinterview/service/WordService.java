@@ -7,12 +7,10 @@ import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Locale;
 import java.util.Map;
@@ -65,8 +63,7 @@ public class WordService {
                 if (response.statusCode() / 100 != 2) {
                     throw new IOException("HTTP " + response.statusCode());
                 }
-                Map<String, Long> counts = WordCounter.count(
-                        new InputStreamReader(body, StandardCharsets.UTF_8), CHUNK_SIZE);
+                Map<String, Long> counts = WordCounter.count(WordCounter.utf8Reader(body), CHUNK_SIZE);
                 repository.complete(url, counts);
                 log.info("job done url={} distinctWords={}", url, counts.size());
             }

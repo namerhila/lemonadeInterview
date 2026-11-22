@@ -11,7 +11,7 @@ Counts are stored in an in-memory hash map (`word -> count`) and are lost on res
 1. Change every `-` and `,` to a space. Example: `Count-ry` → `count`, `ry`.
 2. Split on whitespace (spaces, tabs, `\n`, `\r`).
 3. Lowercase every token, so `Country` and `COUNTRY` are the same word.
-4. **Any non-empty token is a word.** That includes plain English words, numbers (`2024`, `3.14`) and regex-like strings (`^a.*b$`, `[0-9]+`). Other punctuation is kept, so `country.` and `country` are different words.
+4. **Any non-empty token is a word.** That includes plain English words, numbers (`2024`, `3.14`) and regex-like strings (`^a.*b$`, `\d+`). Rule 1 still applies, so a regex with `-` or `,` is split (`[0-9]+` → `[0`, `9]+`). Other punctuation is kept, so `country.` and `country` are different words.
 5. Drop empty tokens. Example: `a--b` → `a`, `b`.
 
 ## 3. English-only content

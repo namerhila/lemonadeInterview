@@ -14,10 +14,12 @@ import org.springframework.test.web.servlet.ResultActions;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Random;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
@@ -146,5 +148,37 @@ class WordJobTest {
         clients.shutdown();
 
         awaitCount("raceword", 10_000);
+    }
+
+    @Test
+    void hebrewFile_202_countsUnchanged_canRetry() throws Exception {
+        String url = files.serve("/hebrew.txt", "qqheb " + "שלום עולם ".repeat(100));
+        postUrl(url).andExpect(status().isAccepted());
+        awaitRetryable(url);
+        assertEquals(0, getCount("qqheb"));
+    }
+
+    @Test
+    void binaryFile_202_countsUnchanged_canRetry() throws Exception {
+        byte[] noise = new byte[4000];
+        new Random(42).nextBytes(noise);
+        noise[10] = (byte) 0xFF; // never valid in UTF-8
+        byte[] prefix = "qqbin ".getBytes(UTF_8);
+        byte[] body = new byte[prefix.length + noise.length];
+        System.arraycopy(prefix, 0, body, 0, prefix.length);
+        System.arraycopy(noise, 0, body, prefix.length, noise.length);
+
+        String url = files.serve("/binary.dat", body);
+        postUrl(url).andExpect(status().isAccepted());
+        awaitRetryable(url);
+        assertEquals(0, getCount("qqbin"));
+    }
+
+    @Test
+    void accentedFile_counted() throws Exception {
+        // 1 accented letter among ~800 letters: well under the 1% limit
+        String text = "the quick brown fox jumps ".repeat(40) + "the café is nice";
+        postUrl(files.serve("/accented.txt", text)).andExpect(status().isAccepted());
+        awaitCount("caf%C3%A9", 1);
     }
 }
